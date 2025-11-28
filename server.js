@@ -178,6 +178,7 @@ app.post("/lightx/run-tool", async (req, res) => {
 
     const uploadUrl = uploadInit.body?.uploadImage;
     const finalImageUrl = uploadInit.body?.imageUrl;
+    console.log("Uploaded to LightX:", finalImageUrl);
 
     if (!uploadUrl || !finalImageUrl) {
       throw new Error(
@@ -290,3 +291,4 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log("Server listening on", PORT);
 });
+
