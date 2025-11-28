@@ -7,7 +7,7 @@
 // Bubble sends:
 // {
 //   "imageUrl": "https://bubble-file-url",   // NOT needed for text2image
-//   "tool": "remove-background",             // cartoon, portrait, image2image, caricature, etc.
+//   "tool": "remove-background" | "cartoon" | "portrait" | "image2image" | "caricature" | "text2image",
 //   "params": { ... }                        // tool-specific options (mostly prompts/options)
 // }
 
@@ -30,9 +30,9 @@ async function lightxPost(path, body) {
   const res = await axios.post(`${LIGHTX_BASE}${path}`, body, {
     headers: {
       "Content-Type": "application/json",
-      "x-api-key": LIGHTX_API_KEY,
+      "x-api-key": LIGHTX_API_KEY
     },
-    validateStatus: () => true, // we'll handle errors
+    validateStatus: () => true // we'll handle errors
   });
 
   if (res.status < 200 || res.status >= 300) {
@@ -70,17 +70,77 @@ app.post("/lightx/run-tool", async (req, res) => {
         .json({ success: false, error: "tool is required" });
     }
 
-    // Special case: text2image - no input image to upload
+    // =========================
+    // SPECIAL CASE: TEXT2IMAGE
+    // =========================
     if (tool === "text2image") {
+      // Call LightX text2image with whatever params Bubble sent
       const toolResp = await lightxPost("/text2image", params);
-      return res.json({ success: true, tool, raw: toolResp });
+
+      if (toolResp.statusCode !== 2000) {
+        throw new Error(
+          `text2image statusCode != 2000: ${JSON.stringify(toolResp)}`
+        );
+      }
+
+      const orderId = toolResp.body?.orderId;
+      const retries = toolResp.body?.maxRetriesAllowed ?? 5;
+
+      // Some implementations may already include output directly
+      const directOutput = toolResp.body?.output;
+      if (!orderId && directOutput) {
+        return res.json({
+          success: true,
+          tool,
+          status: "active",
+          output: directOutput
+        });
+      }
+
+      if (!orderId) {
+        return res.json({
+          success: false,
+          tool,
+          error: "No orderId or output returned from text2image",
+          raw: toolResp
+        });
+      }
+
+      // Poll order-status
+      let statusResp;
+      let status;
+
+      for (let i = 0; i < retries; i++) {
+        await sleep(3000);
+        statusResp = await lightxPost("/order-status", { orderId });
+        status = statusResp.body?.status;
+        if (status === "active" || status === "failed") break;
+      }
+
+      if (status !== "active") {
+        return res.json({
+          success: false,
+          tool,
+          status,
+          raw: statusResp
+        });
+      }
+
+      return res.json({
+        success: true,
+        tool,
+        status,
+        output: statusResp.body?.output
+      });
     }
 
-    // All other tools need an image
+    // =========================
+    // ALL OTHER IMAGE-BASED TOOLS
+    // =========================
     if (!imageUrl) {
       return res.status(400).json({
         success: false,
-        error: "imageUrl is required for this tool",
+        error: "imageUrl is required for this tool"
       });
     }
 
@@ -107,7 +167,7 @@ app.post("/lightx/run-tool", async (req, res) => {
     const uploadInit = await lightxPost("/uploadImageUrl", {
       uploadType: "imageUrl",
       size,
-      contentType,
+      contentType
     });
 
     if (uploadInit.statusCode !== 2000) {
@@ -128,7 +188,7 @@ app.post("/lightx/run-tool", async (req, res) => {
     // 3) Download image from Bubble as binary
     const fileResp = await axios.get(imageUrl, {
       responseType: "arraybuffer",
-      validateStatus: () => true,
+      validateStatus: () => true
     });
 
     if (fileResp.status < 200 || fileResp.status >= 300) {
@@ -143,9 +203,9 @@ app.post("/lightx/run-tool", async (req, res) => {
     const putResp = await axios.put(uploadUrl, fileBuffer, {
       headers: {
         "Content-Type": contentType,
-        "Content-Length": fileBuffer.length,
+        "Content-Length": fileBuffer.length
       },
-      validateStatus: () => true,
+      validateStatus: () => true
     });
 
     if (putResp.status < 200 || putResp.status >= 300) {
@@ -160,19 +220,34 @@ app.post("/lightx/run-tool", async (req, res) => {
 
     const toolResp = await lightxPost(toolPath, {
       imageUrl: finalImageUrl,
-      ...params,
+      ...params
     });
+
+    if (toolResp.statusCode !== 2000) {
+      throw new Error(
+        `${tool} statusCode != 2000: ${JSON.stringify(toolResp)}`
+      );
+    }
 
     const orderId = toolResp.body?.orderId;
     const retries = toolResp.body?.maxRetriesAllowed ?? 5;
 
     // Some tools might be synchronous and not return orderId
-    if (!orderId) {
+    if (!orderId && toolResp.body?.output) {
       return res.json({
         success: true,
         tool,
-        synchronous: true,
-        raw: toolResp,
+        status: "active",
+        output: toolResp.body.output
+      });
+    }
+
+    if (!orderId) {
+      return res.json({
+        success: false,
+        tool,
+        error: "No orderId or output returned from tool",
+        raw: toolResp
       });
     }
 
@@ -192,7 +267,7 @@ app.post("/lightx/run-tool", async (req, res) => {
         success: false,
         tool,
         status,
-        raw: statusResp,
+        raw: statusResp
       });
     }
 
@@ -201,7 +276,7 @@ app.post("/lightx/run-tool", async (req, res) => {
       success: true,
       tool,
       status,
-      output: statusResp.body?.output,
+      output: statusResp.body?.output
     });
   } catch (err) {
     console.error("Error in /lightx/run-tool:", err.message);
