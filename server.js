@@ -162,6 +162,7 @@ app.post("/lightx/run-tool", async (req, res) => {
 
     const size = parseInt(sizeHeader, 10);
     const contentType = typeHeader || "image/jpeg";
+console.log("[HEAD] size from Bubble:", size, "bytes, type:", contentType);
 
     // 2) Ask LightX for upload URL
     const uploadInit = await lightxPost("/uploadImageUrl", {
@@ -199,6 +200,7 @@ app.post("/lightx/run-tool", async (req, res) => {
     }
 
     const fileBuffer = Buffer.from(fileResp.data);
+console.log("[GET] downloaded buffer length:", fileBuffer.length, "bytes");
 
     // 4) PUT to LightX S3 upload URL
     const putResp = await axios.put(uploadUrl, fileBuffer, {
@@ -214,6 +216,8 @@ app.post("/lightx/run-tool", async (req, res) => {
         `S3 upload failed: HTTP ${putResp.status} ${putResp.statusText}`
       );
     }
+console.log("[PUT] S3 status:", putResp.status);
+console.log("[LightX] finalImageUrl:", finalImageUrl);
 
     // 5) Call the chosen LightX tool
     // e.g. tool = "cartoon" → POST /cartoon
@@ -291,4 +295,5 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log("Server listening on", PORT);
 });
+
 
